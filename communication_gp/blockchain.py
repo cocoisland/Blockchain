@@ -15,11 +15,27 @@ class Blockchain(object):
         self.chain = []
         self.current_transactions = []
         self.nodes = set()
+        self.new_genesis_block()
 
-        self.new_block(previous_hash=1, proof=100)
+    def new_genesis_block(self):
+        """
+        Hard coded a new Genesisn Block to start a new chain
+        """
+        block = {
+            'index': 1,
+            'timestamp': 0,
+            'transactions': [],
+            'proof': 99,
+            'previous_hash': 1,
+        }
+        self.chain.append(block)
 
     def new_block(self, proof, previous_hash=None):
         """
+        :param proof: <int> The proof given by the Proof of Work algorithm
+        :param previous_hash: (Optional) <str> Hash of previous Block
+        :return: <dict> New Block
+    
         Create a new Block in the Blockchain
 
         :param proof: <int> The proof given by the Proof of Work algorithm
@@ -39,6 +55,7 @@ class Blockchain(object):
         self.current_transactions = []
 
         self.chain.append(block)
+        self.broadcast_new_block(block)
         return block
 
     def new_transaction(self, sender, recipient, amount):
@@ -152,20 +169,20 @@ class Blockchain(object):
         new_chain = None
 
         # We're only looking for chains longer than ours
-        max_length = len(self.chain)
+        self_length = len(self.chain)
 
         # Grab and verify the chains from all the nodes in our network
         for node in neighbours:
             response = requests.get(f'http://{node}/chain')
 
             if response.status_code == 200:
-                length = response.json()['length']
-                chain = response.json()['chain']
+                neighbor_length = response.json()['length']
+                neighbor_chain = response.json()['chain']
 
                 # Check if the length is longer and the chain is valid
-                if length > max_length and self.valid_chain(chain):
-                    max_length = length
-                    new_chain = chain
+                if neighbor_length > self_length and self.valid_chain(neighbor_chain):
+                    self_length = neighbor_length
+                    new_chain = neighbor_chain
 
         # Replace our chain if we discovered a new, valid chain longer than
         # ours
@@ -174,6 +191,22 @@ class Blockchain(object):
             return True
 
         return False
+
+    def broadcast_new_block(self, new_block):
+        """
+        When a new block is mined, alert all nodes in its list 
+        of registered nodes to add the new block
+        """
+        post_data = {'block': new_block}
+        neighbours = self.nodes
+        # Grab and notify all the nodes in our network
+        for node in neighbours:
+            r = requests.post(f'http://{node}/receive_new_block', json=post_data)
+
+            if r.status_code != 201:
+                response= requests.get(f'http://{node}/resolve').json()
+                #return response['message']
+                print(f'broadcast new block error: {response}')
 
 
 # Instantiate our Node
@@ -207,6 +240,7 @@ def mine():
         # Forge the new BLock by adding it to the chain
         previous_hash = blockchain.hash(last_block)
         block = blockchain.new_block(submitted_proof, previous_hash)
+        #broadcast_new_block(block)
 
         response = {
             'message': "New Block Forged",
@@ -240,6 +274,30 @@ def new_transaction():
     response = {'message': f'Transaction will be added to Block {index}'}
     return jsonify(response), 201
 
+@app.route('/receive_new_block', methods=['POST'])
+def receive_new_block():
+    neighbor = request.get_json()
+    # Check that the required fields are in the POST'ed data
+    if not all(k in neighbor for k in ['block']):
+        return 'Missing Values', 400
+
+    # Validate the new block by checking the index, previous hash, and proof
+    last_block = blockchain.last_block
+    new_block = neighbor['block']
+  
+    # neighbor index must be the next index from lastblock index
+    if new_block['index'] == last_block['index'] + 1 :
+        # neighbor last hash equal self last block hash
+        if new_block['previous_hash'] == blockchain.hash(last_block):
+            # last_block proof and neighbor proof hash to yield valid proof
+            if blockchain.valid_proof(last_block['proof'], new_block['proof']):
+                # neighbor new block is good, let append to self chain
+                blockchain.chain.append(new_block)
+                response = {'message': f'New Block added {new_block}'}
+                return jsonify(response), 201
+
+    response = {'message': f'New Block rejected {new_block}'}
+    return jsonify(response), 201
 
 @app.route('/chain', methods=['GET'])
 def full_chain():

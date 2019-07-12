@@ -86,7 +86,6 @@ class Blockchain(object):
         :param amount: <int> Amount
         :return: <int> The index of the BLock that will hold this transaction
         """
-
         self.current_transactions.append({
             'sender': sender,
             'recipient': recipient,
@@ -249,13 +248,14 @@ def mine():
 
     values = request.get_json()
     submitted_proof = values.get('proof')
+    sender_ID = values.get('ID')
 
     if blockchain.valid_proof(last_proof, submitted_proof):
         # We must receive a reward for finding the proof.
         # The sender is "0" to signify that this node has mine a new coin
         blockchain.new_transaction(
-            sender="0",
-            recipient=node_identifier,
+            sender=sender_ID,
+            recipient=sender_ID,
             amount=1,
         )
 
